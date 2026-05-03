@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PinguMenú!</title>
+    <style>
+        :root { --primary: #f39c12; --secondary: #3498db; --dark: #121212; --card-bg: #1e1e1e; --text: #e0e0e0; }
+        body { font-family: 'Segoe UI', sans-serif; background-color: var(--dark); color: var(--text); margin: 0; display: flex; justify-content: center; padding: 20px; }
+        #app { width: 100%; max-width: 900px; }
+        .login-box { background: var(--card-bg); padding: 30px; border-radius: 15px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.5); margin-top: 50px; }
+        input, select { width: 100%; padding: 12px; margin: 10px 0; border-radius: 8px; border: 1px solid #333; background: #252525; color: white; box-sizing: border-box; }
+        button { background: var(--primary); color: white; border: none; padding: 12px 20px; border-radius: 8px; cursor: pointer; font-weight: bold; width: 100%; transition: 0.3s; margin-top: 5px; }
+        button:hover { filter: brightness(1.2); }
+        button:disabled { background: #444 !important; cursor: not-allowed; }
+        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--primary); margin-bottom: 20px; padding-bottom: 10px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px; }
+        .card { background: var(--card-bg); padding: 20px; border-radius: 12px; border: 1px solid #333; }
+        .price-tag { color: var(--primary); font-size: 1.4rem; font-weight: bold; margin: 10px 0; }
+        .log-container { margin-top: 40px; background: #111; padding: 20px; border-radius: 10px; border: 1px dashed var(--primary); }
+        .log-item { font-size: 0.85rem; padding: 8px 0; border-bottom: 1px solid #222; display: flex; justify-content: space-between; }
+        .pingu-card { color: #3498db; font-weight: bold; }
+        .efectivo { color: #2ecc71; font-weight: bold; }
+        #admin-reset-btn { background: #ff4757; color: white; margin-bottom: 20px; border: 2px solid white; }
+    </style>
+</head>
+<body>
+
+<div id="app">
+    <div id="login-section" class="login-box">
+        <h1>🐧 PinguMenú</h1>
+        <p>Comidas increíbles, sabores fascinantes.</p>
+        <input type="text" id="username" placeholder="Ingresa tu nombre!">
+        <button onclick="login()">OK!</button>
+    </div>
+
+    <div id="main-section" style="display:none;">
+        <div id="admin-area"></div>
+        <div class="header">
+            <h2 id="welcome-txt"></h2>
+            <button onclick="logout()" style="width:auto; background:#e74c3c">Salir</button>
+        </div>
+
+        <div class="grid" id="menu-grid"></div>
+
+        <div class="log-container">
+            <h3>📜 Historial y Notificaciones</h3>
+            <div id="compra-log"></div>
+            <button id="clear-log-btn" onclick="borrarLog()" style="width:auto; font-size:12px; background:#444; margin-top:10px; display:none;">Limpiar Historial</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // --- CONFIGURACIÓN ---
+    const DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1500598556229373972/daFVRbU3Emt8IIBvOmkqcUX_N-8Au4o4dwhYmt9zspaZOK0i8xe46vBIhPYC7d70BNoX'; // <--- PEGA TU URL AQUÍ
+    
+    const platillosBase = [
+        { id: 1, nombre: "Sandwiché", precio: 20, stock: 5 },
+        { id: 2, nombre: "Quesadilla", precio: 12, stock: 10 },
+        { id: 3, nombre: "Huevitos Riquisimos", precio: 15, stock: 20 },
+        { id: 4, nombre: "Salchichas con Catsup", precio: 20, stock: 8}
+        
+    ];
+
+    const cupones = { "RICKY10": 0.10, "PINGU50": 0.50, "GRATIS": 1.00 };
+
+    let productosActuales = [];
+
+    function login() {
+        const user = document.getElementById('username').value;
+        if (user.trim()) {
+            localStorage.setItem('ricky_session', user);
+            initApp();
+        }
+    }
+
+    function logout() {
+        localStorage.removeItem('ricky_session');
+        location.reload();
+    }
+
+    function initApp() {
+        const user = localStorage.getItem('ricky_session');
+        if (!user) return;
+
+        const stockGuardado = localStorage.getItem('ricky_stock');
+        productosActuales = stockGuardado ? JSON.parse(stockGuardado) : [...platillosBase];
+
+        document.getElementById('login-section').style.display = 'none';
+        document.getElementById('main-section').style.display = 'block';
+        document.getElementById('welcome-txt').innerText = `Hola, ${user}`;
+
+        if (user === "Reseteo") {
+            document.getElementById('admin-area').innerHTML = `<button id="admin-reset-btn" onclick="resetTotal()">⚠️ RESET TOTAL (ADMIN)</button>`;
+        }
+
+        renderMenu();
+        actualizarLog();
+    }
+
+    function renderMenu() {
+        const grid = document.getElementById('menu-grid');
+        grid.innerHTML = productosActuales.map(p => `
+            <div class="card">
+                <h3>${p.nombre}</h3>
+                <p>Stock: <strong id="stock-val-${p.id}">${p.stock}</strong></p>
+                <div class="price-tag"><span id="display-total-${p.id}">$${p.precio.toFixed(2)}</span></div>
+                <input type="number" id="qty-${p.id}" value="1" min="1" max="${p.stock}" oninput="actualizarCalculo(${p.id})">
+                <input type="text" id="coupon-${p.id}" placeholder="Código Promo" oninput="actualizarCalculo(${p.id})">
+                <select id="pago-${p.id}">
+                    <option value="Efectivo">💵 Efectivo</option>
+                    <option value="PinguCard Deud">💳 PinguCard Deud</option>
+                </select>
+                <button onclick="comprar(${p.id})" ${p.stock <= 0 ? 'disabled' : ''}>${p.stock > 0 ? 'Comprar' : 'Agotado'}</button>
+            </div>
+        `).join('');
+    }
+
+    function actualizarCalculo(id) {
+        const p = productosActuales.find(item => item.id === id);
+        const qty = parseInt(document.getElementById(`qty-${id}`).value) || 0;
+        const code = document.getElementById(`coupon-${id}`).value.trim().toUpperCase();
+        let total = p.precio * qty;
+        if (cupones[code]) total -= (total * cupones[code]);
+        document.getElementById(`display-total-${id}`).innerText = `$${total.toFixed(2)}`;
+    }
+
+    function comprar(id) {
+        const p = productosActuales.find(item => item.id === id);
+        const qty = parseInt(document.getElementById(`qty-${id}`).value);
+        const code = document.getElementById(`coupon-${id}`).value.trim().toUpperCase();
+        const metodo = document.getElementById(`pago-${id}`).value;
+        const user = localStorage.getItem('ricky_session');
+
+        let total = p.precio * qty;
+        let descInfo = "Ninguno";
+        if (cupones[code]) {
+            total -= (total * cupones[code]);
+            descInfo = code;
+        }
+
+        if (qty > p.stock) return alert("Sin stock suficiente");
+
+        if (confirm(`¿Finalizar compra por $${total.toFixed(2)}?`)) {
+            p.stock -= qty;
+            localStorage.setItem('ricky_stock', JSON.stringify(productosActuales));
+
+            const datosCompra = { 
+                item: p.nombre, cant: qty, total: total.toFixed(2), 
+                metodo, promo: descInfo, fecha: new Date().toLocaleTimeString(), user 
+            };
+
+            const historial = JSON.parse(localStorage.getItem('ricky_log') || "[]");
+            historial.unshift(datosCompra);
+            localStorage.setItem('ricky_log', JSON.stringify(historial));
+
+            enviarNotificacionDiscord(datosCompra);
+            renderMenu();
+            actualizarLog();
+        }
+    }
+
+    function enviarNotificacionDiscord(c) {
+        if (!DISCORD_WEBHOOK_URL || DISCORD_WEBHOOK_URL.includes('TU_URL')) return;
+
+        const payload = {
+            content: `💰 **NUEVA VENTA**\n**Producto:** ${c.item}\n**Cantidad:** ${c.cant}\n**Total:** $${c.total}\n**Método:** ${c.metodo}\n**Cupón:** ${c.promo}\n**Cliente:** ${c.user}`
+        };
+
+        fetch(DISCORD_WEBHOOK_URL, {
+            method: 'POST',
+            mode: 'no-cors', 
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            keepalive: true
+        });
+    }
+
+    function actualizarLog() {
+        const logDiv = document.getElementById('compra-log');
+        const historial = JSON.parse(localStorage.getItem('ricky_log') || "[]");
+        document.getElementById('clear-log-btn').style.display = historial.length ? 'block' : 'none';
+        logDiv.innerHTML = historial.length ? historial.map(h => `
+            <div class="log-item">
+                <span><b>${h.cant}x</b> ${h.item}</span>
+                <span>$${h.total} <span class="${h.metodo === 'Efectivo' ? 'efectivo' : 'pingu-card'}">[${h.metodo}]</span></span>
+            </div>
+        `).join('') : '<p style="color:#666">No hay ventas.</p>';
+    }
+
+    function borrarLog() { if(confirm("¿Borrar historial?")) { localStorage.removeItem('ricky_log'); actualizarLog(); } }
+    function resetTotal() { if(confirm("¿RESET TOTAL?")) { localStorage.clear(); location.reload(); } }
+
+    window.onload = initApp;
+</script>
+</body>
+</html>
